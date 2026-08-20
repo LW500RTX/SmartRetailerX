@@ -1,0 +1,25 @@
+# -------------------------------------------------------------
+# SmartRetailX Prometheus Production Alerting Rules
+# -------------------------------------------------------------
+groups:
+  - name: smartretailx_alerts
+    rules:
+      - alert: HighErrorRate
+        expr: (sum(rate(http_requests_total{status=~"5.."}[1m])) / sum(rate(http_requests_total[1m]))) * 100 > 1
+        for: 1m
+        labels:
+          severity: critical
+          environment: production
+        annotations:
+          summary: "High HTTP 5xx error rate detected on {{ $labels.instance }}"
+          description: "HTTP 5xx error rate is currently at {{ $value }}%, exceeding SLA threshold of 1% over 1m."
+
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[1m])) by (le)) > 0.25
+        for: 1m
+        labels:
+          severity: warning
+          environment: production
+        annotations:
+          summary: "High p95 response latency detected on {{ $labels.instance }}"
+          description: "p95 latency is currently at {{ $value }}s, exceeding SLA threshold of 250ms."

@@ -1,0 +1,17 @@
+{
+  "name": "notification-service",
+  "version": "1.0.0",
+  "description": "SmartRetailX SQS Event Notification Service with AWS SES Email Delivery",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-ses": "^3.712.0",
+    "@aws-sdk/client-sqs": "^3.712.0",
+    "aws-xray-sdk": "^3.9.0",
+    "express": "^4.21.2",
+    "nodemailer": "^9.0.5",
+    "opossum": "^8.3.0"
+  }
+}

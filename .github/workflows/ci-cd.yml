@@ -1,0 +1,136 @@
+name: SmartRetailX CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main", "master", "develop" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+env:
+  AWS_REGION: ap-south-1
+
+jobs:
+  # -------------------------------------------------------------
+  # JOB 1: RUN AUTOMATED UNIT TESTS (Node.js & Python)
+  # -------------------------------------------------------------
+  test-node-services:
+    name: 🧪 Run Node.js Unit Tests (Jest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 18.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'npm'
+          cache-dependency-path: services/product-service/package-lock.json
+
+      - name: Test Product Service
+        run: |
+          cd services/product-service
+          npm ci
+          npm test
+
+      - name: Test Inventory Service
+        run: |
+          cd services/inventory-service
+          npm ci
+          npm test
+
+  test-python-services:
+    name: 🧪 Run Python Unit Tests (Pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies & Run Order Service Tests
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r services/order-service/requirements.txt
+          pip install pytest pytest-mock fastapi httpx email-validator sqlalchemy
+          pytest services/order-service/tests/ -v
+
+      - name: Install Dependencies & Run User Service Tests
+        run: |
+          pip install -r services/user-service/requirements.txt
+          pytest services/user-service/tests/ -v
+
+  # -------------------------------------------------------------
+  # JOB 2: DOCKER BUILD & AWS ECR PUSH (Only runs if tests pass!)
+  # -------------------------------------------------------------
+  build-and-push-ecr:
+    name: 📦 Build Docker Images & Push to ECR
+    needs: [test-node-services, test-python-services]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & Push Product Service Image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/smartretailx-product:$IMAGE_TAG -t $ECR_REGISTRY/smartretailx-product:latest ./services/product-service
+          docker push $ECR_REGISTRY/smartretailx-product --all-tags
+
+      - name: Build & Push Order Service Image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/smartretailx-order:$IMAGE_TAG -t $ECR_REGISTRY/smartretailx-order:latest ./services/order-service
+          docker push $ECR_REGISTRY/smartretailx-order --all-tags
+
+      - name: Build & Push Inventory Service Image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/smartretailx-inventory:$IMAGE_TAG -t $ECR_REGISTRY/smartretailx-inventory:latest ./services/inventory-service
+          docker push $ECR_REGISTRY/smartretailx-inventory --all-tags
+
+  # -------------------------------------------------------------
+  # JOB 3: DEPLOY TO AMAZON EKS CLUSTER
+  # -------------------------------------------------------------
+  deploy-to-eks:
+    name: 🚀 Deploy to Amazon EKS Cluster
+    needs: [build-and-push-ecr]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update Kubeconfig for EKS
+        run: |
+          aws eks update-kubeconfig --name smartretailx-eks-production --region ${{ env.AWS_REGION }}
+
+      - name: Apply Kubernetes Manifests
+        run: |
+          kubectl apply -f ./k8s/

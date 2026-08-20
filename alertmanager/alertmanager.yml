@@ -1,0 +1,18 @@
+# -------------------------------------------------------------
+# SmartRetailX Alertmanager Configuration
+# -------------------------------------------------------------
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ['alertname', 'cluster', 'service']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 1h
+  receiver: 'webhook-receiver'
+
+receivers:
+  - name: 'webhook-receiver'
+    webhook_configs:
+      - url: 'http://notification-service:9000/api/v1/alerts/webhook'
+        send_resolved: true
